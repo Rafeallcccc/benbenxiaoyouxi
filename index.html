@@ -64,6 +64,12 @@
   #result .msg{ font-size:26px; font-weight:bold; color:var(--ink); margin:6px 0 2px; }
   #result .dist{ font-size:20px; color:#666; margin:6px 0; }
   #result .dist b{ font-size:40px; color:var(--accent); }
+  #result .hit{
+    font-size:19px; font-weight:bold; margin:2px 0 8px;
+    padding:6px 14px; border-radius:20px; display:inline-block;
+  }
+  #result .hit.ok{ background:#e6ffe6; color:#1a9e3f; }
+  #result .hit.miss{ background:#fff2e6; color:#e07b1a; }
   #result .best{ font-size:15px; color:#999; margin-bottom:16px; }
   #result button{
     font-family:inherit; font-size:22px; font-weight:bold; color:#fff;
@@ -78,11 +84,12 @@
   <canvas id="game"></canvas>
   <div id="title"><span class="plane">✈️</span>纸飞机 · 看谁飞得远</div>
   <button id="mute" title="声音开关">🔊</button>
-  <div id="hint">👆 按住屏幕任意处，往后/往下拉，松手飞出去！</div>
+  <div id="hint">👆 按住屏幕任意处往后拉，让飞机落进地上的圈里！</div>
   <div id="result">
     <div class="face" id="face">🎉</div>
     <div class="msg" id="msg">太棒了！</div>
     <div class="dist">飞了 <b id="dist">0</b> 米</div>
+    <div class="hit miss" id="hit">差 0 米</div>
     <div class="best" id="best">🏆 最远纪录：0 米</div>
     <button id="again">再飞一次 🚀</button>
   </div>
@@ -96,6 +103,7 @@
   const faceEl = document.getElementById('face');
   const msgEl = document.getElementById('msg');
   const distEl = document.getElementById('dist');
+  const hitEl = document.getElementById('hit');
   const bestEl = document.getElementById('best');
   const againBtn = document.getElementById('again');
   const muteBtn = document.getElementById('mute');
@@ -110,6 +118,8 @@
   let pointer = { active:false, x:0, y:0 };
   let launchDir = { x:1, y:-1 }, launchSpeed = 0, dragDist = 0;
   let distanceMeters = 0;
+  let targetX = 0, targetMeters = 0;   // 目标标记物（地面上）
+  const HIT_TOLERANCE = 2;             // 差距 2 米内算成功
   let best = loadBest();
 
   // 安全存取：部分浏览器/微信 webview 可能禁用 localStorage，失败则退回内存值，不让游戏崩
@@ -175,6 +185,7 @@
     anchorY = groundY - 18;
 
     resetPlane();
+    pickTarget();
     buildDecor();
   }
 
@@ -187,7 +198,28 @@
 
   function newWind(){
     // 随机风向与风力：负值=向左吹，正值=向右吹
-    wind = (Math.random() * 2 - 1) * 62 * S;
+    // 每一局风力差别很大（小风 / 大风 / 阵风都有），增加变数
+    const r = Math.random();
+    let power;
+    if(r < 0.35){        // 小风
+      power = Math.random() * 70;
+    } else if(r < 0.80){ // 中风
+      power = 70 + Math.random() * 90;
+    } else {             // 大风/阵风
+      power = 160 + Math.random() * 140;
+    }
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    wind = dir * power * S;
+  }
+
+  // 本局目标标记物：自动选一个"够得着、但不算太近"的距离
+  function pickTarget(){
+    const maxMeters = Math.pow(maxSpeed, 2) / gravity / 12;    // 45° 时的理论最远距离（米）
+    let m = maxMeters * (0.45 + Math.random() * 0.28);          // 取理论最远的 45%~73%
+    m = Math.min(m, (W - anchorX - 14) / 12);                   // 不能飞出屏幕右边
+    m = Math.max(m, 12);                                        // 至少 12 米，不能太近
+    targetMeters = Math.round(m);
+    targetX = anchorX + targetMeters * 12;
   }
 
   function buildDecor(){
@@ -205,6 +237,7 @@
 
   function newRound(){
     newWind();
+    pickTarget();
     resetPlane();
     state = 'ready';
     distanceMeters = 0;
@@ -318,18 +351,30 @@
     const isRecord = distanceMeters > best;
     if(isRecord){ best = distanceMeters; saveBest(best); }
 
+    // 与目标标记物的距离差
+    const diffMeters = Math.abs(plane.x - targetX) / 12;
+    const hit = diffMeters <= HIT_TOLERANCE;
+
     // 评级与表情
     let face, msg, good;
-    if(distanceMeters >= 70){ face='🏆'; msg='破纪录啦！'; good=true; }
+    if(hit){ face='🥳'; msg='落进落点啦！'; good=true; }
+    else if(distanceMeters >= 70){ face='🏆'; msg='破纪录啦！'; good=true; }
     else if(distanceMeters >= 40){ face='🌟'; msg='太棒了！'; good=true; }
     else if(distanceMeters >= 20){ face='🎉'; msg='好厉害！'; good=true; }
     else if(distanceMeters >= 8){ face='👍'; msg='飞得不错！'; good=true; }
     else { face='💪'; msg='再试一次！'; good=false; }
-    if(isRecord && distanceMeters > 0){ msg = '🎉 新纪录！'; }
+    if(isRecord && distanceMeters > 0 && !hit){ msg = '🎉 新纪录！'; }
 
     faceEl.textContent = face;
     msgEl.textContent = msg;
     distEl.textContent = distanceMeters;
+    if(hit){
+      hitEl.className = 'hit ok';
+      hitEl.textContent = '✅ 落点正中（' + targetMeters + ' 米）';
+    } else {
+      hitEl.className = 'hit miss';
+      hitEl.textContent = '差 ' + diffMeters.toFixed(1) + ' 米';
+    }
     bestEl.textContent = '🏆 最远纪录：' + best + ' 米';
     resultEl.classList.add('show');
 
@@ -383,6 +428,55 @@
     ctx.arc(c.x - s*0.9, c.y + s*0.25, s*0.7, 0, Math.PI*2);
     ctx.arc(c.x, c.y - s*0.45, s*0.8, 0, Math.PI*2);
     ctx.fill();
+  }
+
+  function drawTarget(){
+    const x = targetX, gy = groundY, s = S;
+    const rx = HIT_TOLERANCE * 12;              // 落点圈半径 = 2 米（水平投影）
+    const ry = Math.max(6*s, rx * 0.30);        // 贴地压扁，看着像地上的圈
+
+    // 落点圈：贴地白色虚线圈（飞机落进这个圈里就算成功）
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(x, gy + 2*s, rx, ry, 0, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.42)';
+    ctx.fill();
+    ctx.setLineDash([7*s, 6*s]);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3*s;
+    ctx.stroke();
+    ctx.restore();
+
+    // 小旗子：标出这个落点有多远
+    const poleH = 70*s;
+    ctx.strokeStyle = '#9a6b3a';
+    ctx.lineWidth = 3.5*s;
+    ctx.beginPath(); ctx.moveTo(x, gy + ry*0.4); ctx.lineTo(x, gy - poleH); ctx.stroke();
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath();
+    ctx.moveTo(x, gy - poleH);
+    ctx.lineTo(x + 28*s, gy - poleH + 11*s);
+    ctx.lineTo(x, gy - poleH + 23*s);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(x, gy - poleH, 4*s, 0, Math.PI*2); ctx.fill();
+
+    // 距离标签（旗子上方）
+    const label = '落点 ' + targetMeters + ' 米';
+    ctx.font = 'bold ' + Math.round(15*S+7) + 'px "Comic Sans MS",sans-serif';
+    const tw = ctx.measureText(label).width;
+    const bh = 26*s;
+    const bx = x - tw/2 - 10*s, by = gy - poleH - 30*s - bh, bw = tw + 20*s;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    if(ctx.roundRect){ ctx.roundRect(bx, by, bw, bh, 13*s); }
+    else { ctx.rect(bx, by, bw, bh); }
+    ctx.fill();
+    ctx.fillStyle = '#e0562e';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, by + bh/2 + 1);
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawGround(){
@@ -492,8 +586,9 @@
     ctx.fillText('风', 0, 4);
     // 箭头
     const dir = wind >= 0 ? 1 : -1;
-    const len = 12 + Math.abs(wind) * 0.7;
-    const ax = 30, ay = -2;
+    const wAbs = Math.abs(wind) / S;                    // 换算成"风速值"（去掉屏幕缩放）
+    const len = 8 + Math.min(wAbs, 300) / 300 * 26;      // 箭头长度 8~34
+    const ax = 32, ay = -2;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 3*S;
     ctx.beginPath(); ctx.moveTo(ax - dir*len, ay); ctx.lineTo(ax + dir*len, ay); ctx.stroke();
@@ -503,6 +598,11 @@
     ctx.lineTo(ax + dir*(len-8), ay - 5);
     ctx.lineTo(ax + dir*(len-8), ay + 5);
     ctx.closePath(); ctx.fill();
+    // 风力文字：小风 / 中风 / 大风
+    const label = wAbs < 70 ? '小风' : (wAbs < 160 ? '中风' : '大风');
+    ctx.fillStyle = wAbs >= 160 ? '#ffd166' : 'rgba(255,255,255,0.85)';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, 78, 5);
     ctx.restore();
   }
 
@@ -574,6 +674,7 @@
     drawSun();
     for(const c of clouds) drawCloud(c);
     drawGround();
+    drawTarget();
     drawLaunchPad();
     drawTrajectoryPreview();
     drawTrail();
