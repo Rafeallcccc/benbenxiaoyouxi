@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#7ec8ff">
+<title>纸飞机 · 一口气飞远</title>
+<style>
+  :root{
+    --ink:#243447;
+    --accent:#2d7ff9;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    background:#7ec8ff;
+    font-family:"Comic Sans MS","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    user-select:none; -webkit-user-select:none; touch-action:none;
+  }
+  #c{ position:fixed; inset:0; width:100%; height:100%; display:block; }
+
+  /* 左上角数据 */
+  #hud{
+    position:fixed; left:16px; top:12px; z-index:10;
+    color:#fff; text-shadow:0 2px 6px rgba(0,70,140,.45);
+    pointer-events:none;
+  }
+  #hud .dist{ font-size:38px; font-weight:bold; line-height:1.05; letter-spacing:-1px; }
+  #hud .dist span{ font-size:17px; margin-left:3px; }
+  #hud .sub{ font-size:14px; margin-top:2px; opacity:.95; }
+
+  /* 右上角按钮 */
+  #mic, #cfg, #mute{
+    position:fixed; top:12px; z-index:12;
+    width:48px; height:48px; border-radius:50%;
+    border:2px solid #fff; background:rgba(255,255,255,.82);
+    font-size:22px; cursor:pointer; line-height:1; padding:0;
+  }
+  #mute{ right:12px; }
+  #cfg{ right:68px; }
+  #mic{ right:124px; }
+  #mic:active, #cfg:active, #mute:active{ transform:scale(.92); }
+  #mic.on{ background:#8ef0a8; border-color:#1a9e3f; }
+
+  /* 吹气力度条 */
+  #blowWrap{
+    position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+    width:min(64vw,320px); height:14px; border-radius:8px;
+    background:rgba(255,255,255,.55); border:2px solid #fff;
+    overflow:hidden; z-index:10; box-shadow:0 2px 8px rgba(0,70,140,.2);
+  }
+  #blow{
+    height:100%; width:0%;
+    background:linear-gradient(90deg,#8ef0a8,#ffd166,#ff6b6b);
+    border-radius:6px; transition:width .06s linear;
+  }
+
+  /* 底部提示 */
+  #hint{
+    position:fixed; left:50%; bottom:calc(46px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+    z-index:10; color:#fff; font-size:15px; text-align:center; line-height:1.5;
+    text-shadow:0 2px 6px rgba(0,70,140,.5); pointer-events:none;
+    width:84vw; white-space:pre-line;
+  }
+
+  /* 浮提示 */
+  #toast{
+    position:fixed; left:50%; top:24%; transform:translateX(-50%) translateY(-8px);
+    z-index:20; background:rgba(36,52,71,.9); color:#fff;
+    padding:11px 20px; border-radius:16px; font-size:15px; line-height:1.5;
+    opacity:0; transition:opacity .25s, transform .25s; pointer-events:none;
+    max-width:80vw; text-align:center; white-space:pre-line;
+  }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* 结果面板 */
+  #panel{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.9);
+    z-index:30; width:min(84vw,380px);
+    background:#fff; border-radius:26px; padding:24px 22px 20px;
+    box-shadow:0 14px 44px rgba(20,60,110,.35); text-align:center;
+    opacity:0; pointer-events:none; transition:opacity .22s, transform .22s;
+  }
+  #panel.show{ opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto; }
+  #panel .face{ font-size:46px; line-height:1; }
+  #panel .ttl{ font-size:23px; font-weight:bold; color:var(--ink); margin:8px 0 4px; }
+  #panel .sub{ font-size:15px; color:#7b8699; line-height:1.65; white-space:pre-line; margin-bottom:16px; }
+  #panel button{
+    font-family:inherit; font-size:19px; font-weight:bold; color:#fff;
+    background:var(--accent); border:none; border-radius:30px;
+    padding:12px 44px; box-shadow:0 4px 0 #1b5fc4; cursor:pointer;
+  }
+  #panel button:active{ transform:translateY(2px); box-shadow:0 2px 0 #1b5fc4; }
+
+  /* 设置面板 */
+  #sheet{
+    position:fixed; left:50%; bottom:0; transform:translateX(-50%) translateY(120%);
+    width:min(92vw,420px); background:#fff; border-radius:22px 22px 0 0;
+    padding:18px 22px 24px; box-shadow:0 -6px 30px rgba(0,0,0,.22);
+    z-index:35; transition:transform .25s ease; text-align:center;
+  }
+  #sheet.show{ transform:translateX(-50%) translateY(0); }
+  #sheet .ttl{ font-size:18px; font-weight:bold; color:var(--ink); margin-bottom:10px; }
+  #sheet input[type=range]{
+    width:100%; height:36px; -webkit-appearance:none; background:transparent; margin:0;
+  }
+  #sheet input[type=range]::-webkit-slider-runnable-track{
+    height:10px; border-radius:5px;
+    background:linear-gradient(90deg,#cfe8ff,#ffd166,#ff6b6b);
+  }
+  #sheet input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:30px; height:30px; margin-top:-10px;
+    border-radius:50%; background:#fff; border:3px solid var(--accent);
+    box-shadow:0 2px 6px rgba(0,0,0,.2);
+  }
+  #sheet .val{ font-size:14px; color:#7b8699; margin:4px 0 14px; line-height:1.6; }
+  #sheet .val b{ color:var(--accent); font-size:19px; }
+  #sheet button{
+    font-family:inherit; font-size:19px; font-weight:bold; color:#fff;
+    background:var(--accent); border:none; border-radius:30px;
+    padding:11px 40px; box-shadow:0 4px 0 #d96e24;
+  }
+  #sheet button:active{ transform:translateY(2px); box-shadow:0 2px 0 #d96e24; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div class="dist"><b id="distNum">0</b><span>米</span></div>
+  <div class="sub">一口气 <b id="breathNum">0.0</b> 秒 · 最好 <b id="bestNum">0</b> 米</div>
+</div>
+
+<button id="mic">🎤</button>
+<button id="cfg">⚙️</button>
+<button id="mute">🔊</button>
+
+<div id="blowWrap"><div id="blow"></div></div>
+<div id="hint">🎤 点右上角麦克风 · 然后一口气一直吹</div>
+<div id="toast"></div>
+
+<div id="panel">
+  <div class="face" id="pface">💪</div>
+  <div class="ttl" id="ptitle">飞了 0 米</div>
+  <div class="sub" id="psub"></div>
+  <button id="pbtn">再来一次</button>
+</div>
+
+<div id="sheet">
+  <div class="ttl">吹气灵敏度</div>
+  <input id="sens" type="range" min="0.4" max="2" step="0.05" value="0.8">
+  <div class="val">当前 <b id="sensVal">0.80</b> 倍<br>一吹就冲天就往左拉，吹不动就往右拉</div>
+  <button id="sheetOk">好了</button>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------------- 基础 ---------------- */
+  var canvas = document.getElementById('c');
+  var ctx = canvas.getContext('2d');
+  var distNum = document.getElementById('distNum');
+  var breathNum = document.getElementById('breathNum');
+  var bestNum = document.getElementById('bestNum');
+  var blowFill = document.getElementById('blow');
+  var hintEl = document.getElementById('hint');
+  var toastEl = document.getElementById('toast');
+  var panel = document.getElementById('panel');
+  var pface = document.getElementById('pface');
+  var ptitle = document.getElementById('ptitle');
+  var psub = document.getElementById('psub');
+  var pbtn = document.getElementById('pbtn');
+  var micBtn = document.getElementById('mic');
+  var cfgBtn = document.getElementById('cfg');
+  var muteBtn = document.getElementById('mute');
+  var sheetEl = document.getElementById('sheet');
+  var sensEl = document.getElementById('sens');
+  var sensValEl = document.getElementById('sensVal');
+  var sheetOkBtn = document.getElementById('sheetOk');
+
+  var W = 0, H = 0, S = 1, DPR = 1;
+  var GROUND = 0, TOP_Y = 0, START_Y = 0;
+  var G = 0, THRUST = 0, DAMP = 0.985;
+  var PX = 0;
+
+  function loadNum(k, def){
+    try{
+      var v = localStorage.getItem(k);
+      if(v === null) return def;
+      var n = parseFloat(v);
+      return isNaN(n) ? def : n;
+    }catch(e){ return def; }
+  }
+  function saveNum(k, v){
+    try{ localStorage.setItem(k, String(v)); }catch(e){}
+  }
+
+  /* ---------------- 音效 ---------------- */
+  var audioCtx = null, outGain = null, sink = null, whooshGain = null, whooshSrc = null;
+  var muted = false;
+
+  function ensureAudio(){
+    if(!audioCtx){
+      try{
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if(AC){
+          audioCtx = new AC();
+          // outGain：正常出声（音效走这里）
+          outGain = audioCtx.createGain();
+          outGain.gain.value = 1;
+          outGain.connect(audioCtx.destination);
+          // sink：静音通道，只为让麦克风的音频图在 iOS 上持续运行，不发出声音
+          sink = audioCtx.createGain();
+          sink.gain.value = 0;
+          sink.connect(audioCtx.destination);
+          buildWhoosh();
+        }
+      }catch(e){ audioCtx = null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){
+      try{ audioCtx.resume(); }catch(e){}
+    }
+  }
+
+  function buildWhoosh(){
+    if(!audioCtx) return;
+    try{
+      var sr = audioCtx.sampleRate;
+      var len = Math.floor(sr * 2);
+      var buf = audioCtx.createBuffer(1, len, sr);
+      var d = buf.getChannelData(0);
+      for(var i = 0; i < len; i++){ d[i] = (Math.random() * 2 - 1) * 0.5; }
+      whooshSrc = audioCtx.createBufferSource();
+      whooshSrc.buffer = buf;
+      whooshSrc.loop = true;
+      var lp = audioCtx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 800;
+      whooshGain = audioCtx.createGain();
+      whooshGain.gain.value = 0;
+      whooshSrc.connect(lp);
+      lp.connect(whooshGain);
+      whooshGain.connect(outGain);
+      whooshSrc.start();
+    }catch(e){ whooshGain = null; }
+  }
+
+  function beep(freq, dur, vol){
+    if(!audioCtx || muted) return;
+    try{
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = vol || 0.06;
+      o.connect(g);
+      g.connect(outGain);
+      var t = audioCtx.currentTime;
+      g.gain.setValueAtTime(vol || 0.06, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.start(t);
+      o.stop(t + dur);
+    }catch(e){}
+  }
+
+  /* ---------------- 麦克风 ---------------- */
+  var micOn = false, micStream = null, analyser = null;
+  var timeBuf = null, freqBuf = null;
+  var noiseFloor = 0.006, micLastRms = 0;
+  var calibrating = false, calibT = 0, calibSum = 0, calibN = 0, calibMin = 999;
+
+  function enableMic(){
+    ensureAudio();
+    if(!audioCtx){
+      toast('这个浏览器没有音频功能，按住屏幕也能飞', 2600);
+      return;
+    }
+    if(micOn){
+      micOn = false;
+      micBtn.classList.remove('on');
+      stopMic();
+      toast('麦克风关掉了，按住屏幕也能飞', 2000);
+      return;
+    }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      toast('这个浏览器不给用麦克风\n按住屏幕也能玩', 3000);
+      return;
+    }
+    var tries = [
+      {audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1 }},
+      {audio:true}
+    ];
+    attemptMic(tries, 0);
+  }
+
+  function attemptMic(tries, i){
+    if(i >= tries.length){
+      toast('拿不到麦克风\n按住屏幕也能玩', 3000);
+      return;
+    }
+    navigator.mediaDevices.getUserMedia(tries[i]).then(function(st){
+      micStream = st;
+      var src = audioCtx.createMediaStreamSource(st);
+      var boost = audioCtx.createGain();
+      boost.gain.value = 3;
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      src.connect(boost);
+      boost.connect(analyser);
+      boost.connect(sink);
+      timeBuf = new Float32Array(analyser.fftSize);
+      freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      micOn = true;
+      micBtn.classList.add('on');
+      calibrating = true;
+      calibT = 0; calibSum = 0; calibN = 0; calibMin = 999;
+      toast('麦克风开啦！\n先安静 1 秒校准，然后一口气吹', 2800);
+      setTimeout(checkMic, 2400);
+      reset();
+    }).catch(function(){
+      attemptMic(tries, i + 1);
+    });
+  }
+
+  function stopMic(){
+    try{
+      if(micStream && micStream.getTracks){
+        micStream.getTracks().forEach(function(t){ t.stop(); });
+      }
+    }catch(e){}
+    micStream = null;
+    analyser = null;
+    micOn = false;
+    blow = 0;
+    blowFill.style.width = '0%';
+  }
+
+  function checkMic(){
+    if(!micOn) return;
+    if(micLastRms < 0.004){
+      toast('声音好小\n把手机靠近嘴边再吹', 3200);
+    }
+  }
+
+  function calibrate(rms){
+    calibT++;
+    calibSum += rms;
+    calibN++;
+    if(rms < calibMin) calibMin = rms;
+    if(calibT >= 40){
+      calibrating = false;
+      var avg = calibSum / Math.max(1, calibN);
+      noiseFloor = Math.min(calibMin * 1.3, avg * 1.5);
+      if(noiseFloor < 0.0015) noiseFloor = 0.0015;
+      if(noiseFloor > 0.06) noiseFloor = 0.06;
+    }
+  }
+
+  function readBlow(){
+    if(!micOn || !analyser) return 0;
+    analyser.getFloatTimeDomainData(timeBuf);
+    var n = timeBuf.length;
+    var sum = 0;
+    for(var i = 0; i < n; i++){
+      var v = timeBuf[i];
+      sum += v * v;
+    }
+    var rms = Math.sqrt(sum / n);
+    micLastRms = rms;
+    if(calibrating){ calibrate(rms); return 0; }
+
+    var ratio = rms / noiseFloor;
+    var s = (ratio - 2.0) / 8;          // 2 倍底噪起算，10 倍满分
+    if(s < 0) s = 0;
+    if(s > 1) s = 1;
+
+    analyser.getByteFrequencyData(freqBuf);
+    var binHz = audioCtx.sampleRate / n;
+    var hi = 0, tot = 0;
+    for(var k = 2; k < freqBuf.length; k++){
+      var hz = k * binHz;
+      var e = freqBuf[k] / 255;
+      tot += e;
+      if(hz > 1500 && hz < 6000) hi += e;
+    }
+    var hiRatio = tot > 0 ? hi / tot : 0;
+    if(hiRatio > 0.10) s = Math.min(1, s * 1.15);   // 吹气是宽频噪声，只加成、不否决
+
+    return s;
+  }
+
+  /* ---------------- 世界 ---------------- */
+  var scrollX = 0, baseScroll = 0;
+  var clouds = [], birds = [];
+  var puffs = [];
+  var stars = [];
+
+  function buildWorld(){
+    clouds = [];
+    var nc = Math.max(5, Math.round(W / 110));
+    for(var i = 0; i < nc; i++){
+      clouds.push({
+        x: Math.random() * (W + 200) - 100,
+        y: H * (0.06 + Math.random() * 0.42),
+        s: 0.55 + Math.random() * 0.85,
+        p: 0.18 + Math.random() * 0.5
+      });
+    }
+    birds = [];
+    for(var j = 0; j < 3; j++){
+      birds.push({ x: Math.random() * W, y: H * (0.12 + Math.random() * 0.2), p: 0.08 + j * 0.03, ph: Math.random() * 6.28 });
+    }
+    stars = [];
+    for(var k = 0; k < 26; k++){
+      stars.push({ x: Math.random(), y: Math.random() * 0.5, a: 0.2 + Math.random() * 0.6 });
+    }
+  }
+
+  /* ---------------- 游戏状态 ---------------- */
+  var state = 'ready';   // ready | playing | over
+  var plane = { x: 0, y: 0, vy: 0, tilt: 0 };
+  var spd = 0;
+  var dist = 0;
+  var blow = 0, blowPrev = 0;
+  var touchHold = 0;
+  var breathNow = 0, breathBest = 0, quiet = 0;
+  var breathStarted = false, breathSpent = false, breakDist = 0, spentWarned = false;
+  var lastMilestone = 0;
+  var best = loadNum('pp-blowfar-best', 0);
+  var sens = loadNum('pp-blowfar-sens', 0.8);
+
+  function resize(){
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    S = H / 800;
+    GROUND = H * 0.88;
+    TOP_Y = 18 * S;
+    START_Y = H * 0.42;
+    G = 200 * S;
+    THRUST = 700 * S;
+    PX = W * 0.34;
+
+    if(state !== 'playing'){
+      plane.y = START_Y;
+    }
+    buildWorld();
+  }
+
+  function reset(){
+    state = 'ready';
+    plane.y = START_Y;
+    plane.vy = 0;
+    plane.tilt = 0;
+    spd = 0;
+    dist = 0;
+    scrollX = 0;
+    breathNow = 0;
+    breathBest = 0;
+    quiet = 0;
+    breathStarted = false;
+    breathSpent = false;
+    breakDist = 0;
+    spentWarned = false;
+    lastMilestone = 0;
+    puffs = [];
+    blow = 0;
+    blowFill.style.width = '0%';
+    panel.classList.remove('show');
+    hintEl.textContent = micOn ? '👆 点一下开始\n然后一口气一直吹，中途不能换气' : '🎤 先点右上角麦克风\n或者按住屏幕一直按';
+    bestNum.textContent = Math.round(best);
+    updateHUD();
+  }
+
+  function start(){
+    if(state === 'playing') return;
+    ensureAudio();
+    if(state === 'over'){ reset(); }
+    state = 'playing';
+    hintEl.textContent = '💨 一口气吹到底，断了就只能滑翔落地';
+    if(!micOn){ toast('🎤 点右上角麦克风，就能用吹气玩\n（现在按住屏幕也能飞）', 3200); }
+    beep(660, 0.16, 0.07);
+  }
+
+  function land(){
+    state = 'over';
+    var m = Math.round(breakDist);
+    if(m > best){ best = m; saveNum('pp-blowfar-best', best); }
+    var landed = Math.round((scrollX - baseScroll) / 12);
+    var glide = Math.max(0, landed - m);
+    var r = rate(m);
+    pface.textContent = r[0];
+    ptitle.textContent = '一口气吹出 ' + m + ' 米！';
+    psub.textContent = '这口气撑了 ' + breathBest.toFixed(1) + ' 秒\n' +
+                       '断气后又滑翔了 ' + glide + ' 米落地\n' +
+                       '最好纪录 ' + Math.round(best) + ' 米\n' + r[1];
+    panel.classList.add('show');
+    hintEl.textContent = '👆 点屏幕再来一次';
+    beep(330, 0.3, 0.07);
+    bestNum.textContent = Math.round(best);
+  }
+
+  function rate(m){
+    if(m >= 1500) return ['🏆', '传说中的铁肺，太强了！'];
+    if(m >= 900) return ['🥇', '肺活量惊人，厉害！'];
+    if(m >= 500) return ['🦅', '飞得又稳又远'];
+    if(m >= 250) return ['🌟', '很不错哦，再冲一次'];
+    if(m >= 100) return ['🎉', '已经飞出去啦'];
+    return ['💪', '再来一次一定更远'];
+  }
+
+  function updateHUD(){
+    distNum.textContent = Math.round(dist);
+    breathNum.textContent = breathNow.toFixed(1);
+  }
+
+  function toast(txt, ms){
+    toastEl.textContent = txt;
+    toastEl.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ toastEl.classList.remove('show'); }, ms || 2200);
+  }
+
+  function setHint(txt){
+    if(hintEl.textContent !== txt){ hintEl.textContent = txt; }
+  }
+
+  /* ---------------- 逻辑 ---------------- */
+  function update(dt){
+    // 读吹气
+    var target = Math.max(readBlow(), touchHold > 0 ? 1 : 0);
+    blow = target > blow ? blow + (target - blow) * 0.55 : blow + (target - blow) * 0.18;
+
+    if(state === 'playing' && breathSpent){
+      blowFill.style.width = '0%';
+      if(blow > 0.35 && !spentWarned){
+        spentWarned = true;
+        toast('🍃 这口气已经用完了\n等它落地再吹下一轮', 2200);
+      }
+    } else if(micOn){ blowFill.style.width = Math.round(blow * 100) + '%'; }
+    else if(touchHold > 0){ blowFill.style.width = '100%'; }
+    else { blowFill.style.width = '0%'; }
+
+    if(state === 'ready'){
+      // 待机时轻轻漂浮
+      plane.y = START_Y + Math.sin(performance.now() / 900) * 8 * S;
+      plane.tilt = Math.sin(performance.now() / 700) * 0.05;
+      scrollX += 40 * S * dt;
+      updateHUD();
+      tickWorld(dt, 40 * S);
+      return;
+    }
+
+    if(state === 'over'){
+      tickWorld(dt, spd * 0.3);
+      updateHUD();
+      return;
+    }
+
+    // ---- playing ----
+    var b = blow;
+
+    // ===== 阶段 A：还没开始吹（等第一口气）=====
+    if(!breathStarted){
+      if(b > 0.15){
+        breathStarted = true;
+        breathNow = 0;
+        quiet = 0;
+        toast('开始！一口气别停', 1400);
+        beep(720, 0.1, 0.05);
+      } else {
+        plane.y = START_Y + Math.sin(performance.now() / 650) * 7 * S;
+        plane.vy = 0;
+        plane.tilt = Math.sin(performance.now() / 900) * 0.05;
+        spd += (70 * S - spd) * Math.min(1, dt * 2);
+        scrollX += spd * dt;
+        baseScroll = scrollX;
+        dist = 0;
+        setHint('💨 开始吹！第一口气一断就不能再飞了');
+        tickWorld(dt, spd);
+        updateHUD();
+        return;
+      }
+    }
+
+    if(breathSpent){
+      // ===== 阶段 C：这口气断了，只能往前滑翔、慢慢降落 =====
+      // 平滑趋近一个"滑翔下沉速度"，不是自由落体
+      var sv = (160 + 24 * Math.sin(performance.now() / 430)) * S;
+      plane.vy += (sv - plane.vy) * Math.min(1, dt * 1.9);
+      plane.y += plane.vy * dt;
+
+      // 保留向前的惯性，缓慢衰减：看着是往前飘，不是直上直下
+      spd += (90 * S - spd) * Math.min(1, dt * 1.6);
+
+      // 越贴地越放平，落得柔和一点
+      var nearG = Math.max(0, Math.min(1, (plane.y - (GROUND - 120 * S)) / (120 * S)));
+      plane.tilt = 0.22 * (1 - nearG) + Math.sin(performance.now() / 540) * 0.06 * (1 - nearG);
+
+      if(plane.y < TOP_Y){ plane.y = TOP_Y; if(plane.vy < 0) plane.vy = 0; }
+
+      setHint('🍃 滑翔中… 这口气用完了，看它慢慢落地');
+    } else {
+      // ===== 阶段 B：正在吹，还没断 =====
+      var thrust = THRUST * Math.pow(b, 1.6) * sens;
+      plane.vy -= thrust * dt;
+      plane.vy += G * dt;
+      plane.vy *= Math.pow(DAMP, dt * 60);
+      plane.y += plane.vy * dt;
+
+      // 软天花板：飞太高时空气变稀，自动被压回来，不会硬邦邦贴顶
+      var CEIL = H * 0.20;
+      if(plane.y < CEIL){ plane.vy += (CEIL - plane.y) * 6 * dt; }
+      if(plane.y < TOP_Y){ plane.y = TOP_Y; if(plane.vy < 0) plane.vy = 0; }
+
+      // 水平：吹得越用力飞得越快
+      var targetSpd = (55 + 290 * b) * S;
+      spd += (targetSpd - spd) * Math.min(1, dt * 3.2);
+
+      plane.tilt = -b * 0.30 + Math.max(-0.4, Math.min(0.55, plane.vy / (900 * S)));
+
+      // 一口气计时：一断就锁死，不允许第二口复飞
+      if(b > 0.12){
+        quiet = 0;
+        breathNow += dt;
+        if(breathNow > breathBest) breathBest = breathNow;
+        setHint(b > 0.42 ? '💨 保持住，别松口！' : '💨 再用点力，要撑不住啦');
+      } else {
+        quiet += dt;
+        setHint('💨 快吹！气一断就飞不了了');
+        if(quiet > 0.45){
+          breathSpent = true;
+          breakDist = dist;
+          beep(300, 0.26, 0.06);
+          toast('💨 这口气用完了\n接下来只能滑翔落地', 2200);
+        }
+      }
+
+      // 尾迹
+      if(b > 0.22 && Math.random() < dt * 22){
+        puffs.push({ x: PX - 16 * S, y: plane.y + 6 * S, r: (5 + Math.random() * 7) * S, a: 0.55 });
+        if(puffs.length > 90) puffs.shift();
+      }
+    }
+
+    scrollX += spd * dt;
+    // 成绩 = 断气那一刻的距离；断气后滑翔不再计分，只当降落动画
+    if(!breathSpent){ dist = (scrollX - baseScroll) / 12; }
+
+    // 里程碑
+    var ms = Math.floor(dist / 100);
+    if(ms > lastMilestone){
+      lastMilestone = ms;
+      toast('🎉 ' + (ms * 100) + ' 米！', 1300);
+      beep(880, 0.12, 0.05);
+    }
+
+    if(plane.y >= GROUND){
+      plane.y = GROUND;
+      land();
+    }
+
+    tickWorld(dt, spd);
+
+    // 风声音量
+    if(whooshGain && audioCtx){
+      var vol = muted ? 0 : (0.015 + 0.12 * Math.min(1, spd / (345 * S)));
+      whooshGain.gain.value = vol;
+    }
+
+    updateHUD();
+  }
+
+  function tickWorld(dt, speedPx){
+    var i;
+    for(i = 0; i < clouds.length; i++){
+      var c = clouds[i];
+      c.x -= speedPx * c.p * dt;
+      if(c.x < -180){ c.x = W + 120 + Math.random() * 160; c.y = H * (0.06 + Math.random() * 0.42); }
+    }
+    for(i = 0; i < birds.length; i++){
+      var bd = birds[i];
+      bd.x -= speedPx * bd.p * dt;
+      bd.ph += dt * 6;
+      if(bd.x < -60){ bd.x = W + 60; bd.y = H * (0.12 + Math.random() * 0.2); }
+    }
+    for(i = puffs.length - 1; i >= 0; i--){
+      var p = puffs[i];
+      p.x -= speedPx * dt * 0.6;
+      p.r += 26 * S * dt;
+      p.a -= dt * 0.9;
+      if(p.a <= 0) puffs.splice(i, 1);
+    }
+  }
+
+  /* ---------------- 绘制 ---------------- */
+  function lerpColor(a, b, t){
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' +
+                    Math.round(a[1] + (b[1] - a[1]) * t) + ',' +
+                    Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function draw(){
+    var prog = Math.min(1, dist / 1800);
+    var topC = lerpColor([126, 200, 255], [42, 66, 132], prog);
+    var botC = lerpColor([214, 240, 255], [255, 209, 148], prog);
+
+    var g = ctx.createLinearGradient(0, 0, 0, GROUND);
+    g.addColorStop(0, topC);
+    g.addColorStop(1, botC);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, GROUND + 2);
+
+    // 星星（飞远了才看得见）
+    if(prog > 0.45){
+      var sa = (prog - 0.45) / 0.55;
+      for(var si = 0; si < stars.length; si++){
+        var st = stars[si];
+        ctx.globalAlpha = st.a * sa;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(st.x * W, st.y * H, 2.5 * S, 2.5 * S);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // 太阳
+    ctx.globalAlpha = 0.9 - prog * 0.35;
+    ctx.fillStyle = '#fff3c4';
+    ctx.beginPath();
+    ctx.arc(W * 0.82, H * 0.13, 34 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // 云
+    for(var i = 0; i < clouds.length; i++){ drawCloud(clouds[i]); }
+
+    // 鸟
+    for(var j = 0; j < birds.length; j++){
+      var b2 = birds[j];
+      ctx.strokeStyle = 'rgba(60,80,110,.45)';
+      ctx.lineWidth = 2 * S;
+      ctx.beginPath();
+      var wy = Math.sin(b2.ph) * 4 * S;
+      ctx.moveTo(b2.x - 8 * S, b2.y + wy);
+      ctx.quadraticCurveTo(b2.x - 4 * S, b2.y - 3 * S + wy, b2.x, b2.y + wy);
+      ctx.quadraticCurveTo(b2.x + 4 * S, b2.y - 3 * S + wy, b2.x + 8 * S, b2.y + wy);
+      ctx.stroke();
+    }
+
+    // 远山
+    drawHills('rgba(120,170,215,.55)', 34 * S, GROUND - 60 * S, 0.10);
+    drawHills('rgba(70,135,175,.65)', 46 * S, GROUND - 24 * S, 0.22);
+
+    // 地面
+    ctx.fillStyle = '#7ac74f';
+    ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#5aa832';
+    ctx.fillRect(0, GROUND, W, 8 * S);
+
+    // 地面上的刻度线（滚动）
+    ctx.fillStyle = 'rgba(255,255,255,.42)';
+    var step = 60 * S;
+    var off = scrollX % step;
+    for(var x = -off; x < W; x += step){
+      ctx.fillRect(x, GROUND + 16 * S, 4 * S, 10 * S);
+    }
+
+    // 尾迹
+    for(var pi = 0; pi < puffs.length; pi++){
+      var pf = puffs[pi];
+      ctx.globalAlpha = Math.max(0, pf.a) * 0.7;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(pf.x, pf.y, pf.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 机体轻轻左右摆一下，看着不那么僵
+    var swayAmt = (state === 'playing' && breathSpent) ? 8 : 3;
+    var sway = Math.sin(performance.now() / 760) * swayAmt * S;
+    drawPlane(PX + sway, plane.y, plane.tilt, S);
+
+    drawWindyIcon();
+  }
+
+  function drawCloud(c){
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffffff';
+    var s = c.s;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 26 * s * S, 0, Math.PI * 2);
+    ctx.arc(c.x + 26 * s * S, c.y + 4 * s * S, 20 * s * S, 0, Math.PI * 2);
+    ctx.arc(c.x - 26 * s * S, c.y + 6 * s * S, 17 * s * S, 0, Math.PI * 2);
+    ctx.arc(c.x + 6 * s * S, c.y - 12 * s * S, 18 * s * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawHills(color, amp, base, par){
+    var o = (scrollX * par) % 900;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(-10, GROUND + 4);
+    for(var x = -10; x <= W + 10; x += 16){
+      var y = base + Math.sin((x + o) * 0.007) * amp + Math.sin((x + o) * 0.017 + 1.3) * amp * 0.45;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W + 10, GROUND + 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawPlane(x, y, ang, s){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+
+    // 影子
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(0, 26 * s, 30 * s, 8 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // 机身
+    ctx.beginPath();
+    ctx.moveTo(30 * s, 0);
+    ctx.lineTo(-20 * s, -15 * s);
+    ctx.lineTo(-8 * s, 0);
+    ctx.lineTo(-20 * s, 15 * s);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,90,130,.55)';
+    ctx.lineWidth = 2 * s;
+    ctx.stroke();
+
+    // 折痕
+    ctx.beginPath();
+    ctx.moveTo(30 * s, 0);
+    ctx.lineTo(-8 * s, 0);
+    ctx.lineTo(-20 * s, 15 * s);
+    ctx.strokeStyle = 'rgba(150,190,225,.9)';
+    ctx.lineWidth = 1.6 * s;
+    ctx.stroke();
+
+    // 机头
+    ctx.beginPath();
+    ctx.arc(12 * s, 0, 3.4 * s, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // 右上方向箭头示意"风"
+  function drawWindyIcon(){
+    if(state !== 'playing') return;
+    var a = Math.min(1, blow);
+    if(a < 0.05) return;
+    ctx.save();
+    ctx.translate(W - 40 * S, H * 0.5);
+    ctx.globalAlpha = 0.35 + 0.4 * a;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3 * S;
+    ctx.lineCap = 'round';
+    for(var i = 0; i < 3; i++){
+      var yy = (i - 1) * 14 * S;
+      var len = (16 + 26 * a) * S;
+      ctx.beginPath();
+      ctx.moveTo(0, yy);
+      ctx.lineTo(-len, yy);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------------- 主循环 ---------------- */
+  var last = 0;
+  function frame(now){
+    if(!last) last = now;
+    var dt = (now - last) / 1000;
+    last = now;
+    if(dt > 0.05) dt = 0.05;
+    if(dt < 0) dt = 0;
+
+    // iOS 上音频可能被挂起，导致麦克风数据全是 0
+    if(micOn && audioCtx && audioCtx.state === 'suspended'){
+      try{ audioCtx.resume(); }catch(e){}
+    }
+
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------------- 输入 ---------------- */
+  function onDown(e){
+    ensureAudio();
+    if(state === 'ready'){ start(); touchHold = 1; return; }
+    if(state === 'over'){ reset(); start(); touchHold = 1; return; }
+    touchHold = 1;
+  }
+  function onUp(){
+    touchHold = 0;
+  }
+
+  if(window.PointerEvent){
+    canvas.addEventListener('pointerdown', function(e){ e.preventDefault(); onDown(e); }, {passive:false});
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  } else {
+    canvas.addEventListener('touchstart', function(e){ e.preventDefault(); onDown(e); }, {passive:false});
+    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchcancel', onUp);
+    canvas.addEventListener('mousedown', function(e){ e.preventDefault(); onDown(e); });
+    window.addEventListener('mouseup', onUp);
+  }
+
+  window.addEventListener('resize', function(){ resize(); });
+  window.addEventListener('orientationchange', function(){ setTimeout(resize, 250); });
+
+  micBtn.addEventListener('click', function(){ ensureAudio(); enableMic(); });
+  muteBtn.addEventListener('click', function(){
+    muted = !muted;
+    muteBtn.textContent = muted ? '🔇' : '🔊';
+    if(whooshGain) whooshGain.gain.value = 0;
+  });
+  cfgBtn.addEventListener('click', function(){
+    ensureAudio();
+    sheetEl.classList.toggle('show');
+  });
+  sheetOkBtn.addEventListener('click', function(){
+    sheetEl.classList.remove('show');
+    toast('灵敏度 ' + sens.toFixed(2) + ' 倍', 1500);
+  });
+  sensEl.value = sens;
+  sensValEl.textContent = sens.toFixed(2);
+  sensEl.addEventListener('input', function(){
+    sens = parseFloat(sensEl.value);
+    sensValEl.textContent = sens.toFixed(2);
+    saveNum('pp-blowfar-sens', sens);
+  });
+
+  pbtn.addEventListener('click', function(){
+    ensureAudio();
+    reset();
+    start();
+  });
+
+  resize();
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
