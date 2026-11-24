@@ -490,15 +490,15 @@
 
   function land(){
     state = 'over';
-    var m = Math.round(breakDist);
-    if(m > best){ best = m; saveNum('pp-blowfar-best', best); }
     var landed = Math.round((scrollX - baseScroll) / 12);
-    var glide = Math.max(0, landed - m);
-    var r = rate(m);
+    var blown = Math.round(breakDist);
+    var glide = Math.max(0, landed - blown);
+    var r = rate(landed);
+    if(landed > best){ best = landed; saveNum('pp-blowfar-best', best); }
     pface.textContent = r[0];
-    ptitle.textContent = '一口气吹出 ' + m + ' 米！';
-    psub.textContent = '这口气撑了 ' + breathBest.toFixed(1) + ' 秒\n' +
-                       '断气后又滑翔了 ' + glide + ' 米落地\n' +
+    ptitle.textContent = '飞了 ' + landed + ' 米！';
+    psub.textContent = '一口气吹到 ' + blown + ' 米（撑了 ' + breathBest.toFixed(1) + ' 秒）\n' +
+                       '断气后靠惯性又滑翔 ' + glide + ' 米\n' +
                        '最好纪录 ' + Math.round(best) + ' 米\n' + r[1];
     panel.classList.add('show');
     hintEl.textContent = '👆 点屏幕再来一次';
@@ -590,14 +590,15 @@
     }
 
     if(breathSpent){
-      // ===== 阶段 C：这口气断了，只能往前滑翔、慢慢降落 =====
-      // 平滑趋近一个"滑翔下沉速度"，不是自由落体
-      var sv = (160 + 24 * Math.sin(performance.now() / 430)) * S;
-      plane.vy += (sv - plane.vy) * Math.min(1, dt * 1.9);
+      // ===== 阶段 C：断气了，靠惯性继续往前飞、缓慢降低 =====
+      // 下沉很缓：纸飞机断了风也能在空中飘好一会儿
+      var sv = (150 + 22 * Math.sin(performance.now() / 430)) * S;
+      plane.vy += (sv - plane.vy) * Math.min(1, dt * 1.4);
       plane.y += plane.vy * dt;
 
-      // 保留向前的惯性，缓慢衰减：看着是往前飘，不是直上直下
-      spd += (90 * S - spd) * Math.min(1, dt * 1.6);
+      // 关键：向前的速度几乎不掉，只很慢很慢地衰减 —— 这就是"惯性"
+      spd *= Math.pow(0.92, dt);
+      if(spd < 60 * S) spd = 60 * S;
 
       // 越贴地越放平，落得柔和一点
       var nearG = Math.max(0, Math.min(1, (plane.y - (GROUND - 120 * S)) / (120 * S)));
@@ -619,9 +620,13 @@
       if(plane.y < CEIL){ plane.vy += (CEIL - plane.y) * 6 * dt; }
       if(plane.y < TOP_Y){ plane.y = TOP_Y; if(plane.vy < 0) plane.vy = 0; }
 
-      // 水平：吹得越用力飞得越快
+      // 水平：吹得越用力飞得越快；但松口不是刹车，纸飞机靠惯性照样往前冲
       var targetSpd = (55 + 290 * b) * S;
-      spd += (targetSpd - spd) * Math.min(1, dt * 3.2);
+      if(b > 0.12){
+        spd += (targetSpd - spd) * Math.min(1, dt * 3.2);
+      } else {
+        spd *= Math.pow(0.94, dt);
+      }
 
       plane.tilt = -b * 0.30 + Math.max(-0.4, Math.min(0.55, plane.vy / (900 * S)));
 
@@ -650,8 +655,8 @@
     }
 
     scrollX += spd * dt;
-    // 成绩 = 断气那一刻的距离；断气后滑翔不再计分，只当降落动画
-    if(!breathSpent){ dist = (scrollX - baseScroll) / 12; }
+    // 距离一直算：断气后靠惯性飞出去的部分也是实打实的航程
+    dist = (scrollX - baseScroll) / 12;
 
     // 里程碑
     var ms = Math.floor(dist / 100);
@@ -782,10 +787,28 @@
     }
     ctx.globalAlpha = 1;
 
+    // 滑翔阶段：速度线 + 机体往前挪一点，让"惯性在往前冲"看得见
+    var gliding = (state === 'playing' && breathSpent);
+    if(gliding){
+      var spdR = Math.min(1, spd / (345 * S));
+      ctx.strokeStyle = 'rgba(255,255,255,0.62)';
+      ctx.lineWidth = 2 * S;
+      ctx.lineCap = 'round';
+      for(var k = 0; k < 4; k++){
+        var ly = plane.y + (k - 1.5) * 10 * S;
+        var lx = PX - 26 * S - Math.abs(Math.sin(performance.now() / 150 + k * 1.3)) * 22 * S;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx - (14 + 16 * spdR) * S, ly);
+        ctx.stroke();
+      }
+    }
+
     // 机体轻轻左右摆一下，看着不那么僵
-    var swayAmt = (state === 'playing' && breathSpent) ? 8 : 3;
+    var swayAmt = gliding ? 8 : 3;
     var sway = Math.sin(performance.now() / 760) * swayAmt * S;
-    drawPlane(PX + sway, plane.y, plane.tilt, S);
+    var fwd = gliding ? Math.min(22 * S, (spd / (345 * S)) * 22 * S) : 0;
+    drawPlane(PX + sway + fwd, plane.y, plane.tilt, S);
 
     drawWindyIcon();
   }
