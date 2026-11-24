@@ -24,6 +24,43 @@
   #mute{ right:12px; }
   #mic{ right:68px; }
   #auto{ right:124px; }
+  #cfg{
+    position:fixed; top:12px; right:180px; z-index:12;
+    width:48px; height:48px; border-radius:50%;
+    border:2px solid #fff; background:rgba(255,255,255,.8);
+    font-size:20px; cursor:pointer; line-height:1; padding:0;
+  }
+  #cfg:active{ transform:scale(.92); }
+
+  /* 灵敏度设置面板 */
+  #sheet{
+    position:fixed; left:50%; bottom:0; transform:translateX(-50%) translateY(120%);
+    width:min(92vw,420px); background:#fff; border-radius:22px 22px 0 0;
+    padding:18px 22px 24px; box-shadow:0 -6px 30px rgba(0,0,0,.22);
+    z-index:25; transition:transform .25s ease; text-align:center;
+  }
+  #sheet.show{ transform:translateX(-50%) translateY(0); }
+  #sheet .ttl{ font-size:18px; font-weight:bold; color:var(--ink); margin-bottom:10px; }
+  #sheet input[type=range]{
+    width:100%; height:36px; -webkit-appearance:none; background:transparent; margin:0;
+  }
+  #sheet input[type=range]::-webkit-slider-runnable-track{
+    height:10px; border-radius:5px;
+    background:linear-gradient(90deg,#cfe8ff,#ffd166,#ff6b6b);
+  }
+  #sheet input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:30px; height:30px; margin-top:-10px;
+    border-radius:50%; background:#fff; border:3px solid var(--accent);
+    box-shadow:0 2px 6px rgba(0,0,0,.2);
+  }
+  #sheet .val{ font-size:14px; color:#7b8699; margin:4px 0 14px; line-height:1.6; }
+  #sheet .val b{ color:var(--accent); font-size:19px; }
+  #sheet button{
+    font-family:inherit; font-size:19px; font-weight:bold; color:#fff;
+    background:var(--accent); border:none; border-radius:30px;
+    padding:11px 40px; box-shadow:0 4px 0 #d96e24;
+  }
+  #sheet button:active{ transform:translateY(2px); box-shadow:0 2px 0 #d96e24; }
   #auto:active, #mic:active, #mute:active{ transform:scale(.92); }
   #mic.on{ background:#8ef0a8; border-color:#1a9e3f; }
   #auto.on{ background:#c9e8ff; border-color:#2d7ff9; }
@@ -91,10 +128,18 @@
   <button id="auto" title="吹气自动扇翅膀">🪽</button>
   <button id="mic" title="开启吹气">🎤</button>
   <button id="mute" title="声音开关">🔊</button>
+  <button id="cfg" title="吹气灵敏度">⚙️</button>
 
   <div id="hint">👆 点一下屏幕，纸飞机就会往上飞</div>
   <div id="blow"><i id="blowFill"></i></div>
   <div id="toast"></div>
+
+  <div id="sheet">
+    <div class="ttl">吹气灵敏度</div>
+    <input id="sens" type="range" min="0.4" max="2" step="0.05" value="0.65">
+    <div class="val">当前 <b id="sensVal">0.65</b> 倍<br>一吹就窜天就往左拉，吹不动就往右拉</div>
+    <button id="sheetOk">好了</button>
+  </div>
 
   <div id="panel">
     <div class="face" id="pFace">🎉</div>
@@ -117,6 +162,11 @@
   var autoBtn  = document.getElementById('auto');
   var micBtn   = document.getElementById('mic');
   var muteBtn  = document.getElementById('mute');
+  var cfgBtn   = document.getElementById('cfg');
+  var sheetEl  = document.getElementById('sheet');
+  var sensEl   = document.getElementById('sens');
+  var sensValEl= document.getElementById('sensVal');
+  var sheetOkBtn = document.getElementById('sheetOk');
   var panelEl  = document.getElementById('panel');
   var pFace    = document.getElementById('pFace');
   var pMsg     = document.getElementById('pMsg');
@@ -199,6 +249,15 @@
 
   // 自动扇翅膀模式
   var autoFlap = false, autoT = 0;
+
+  // 吹气灵敏度（0.4~2，默认 0.75；嫌太冲往左，吹不动往右）
+  var sens = (function(){
+    try{
+      var v = parseFloat(localStorage.getItem('pp-sens'));
+      if(v > 0.3 && v < 3){ return v; }
+    }catch(e){}
+    return 0.65;
+  })();
 
   function toast(msg, ms){
     toastEl.textContent = msg;
@@ -541,6 +600,23 @@
     muteBtn.textContent = muted ? '🔇' : '🔊';
   });
 
+  // 灵敏度设置
+  sensEl.value = sens;
+  sensValEl.textContent = sens.toFixed(2);
+  sensEl.addEventListener('input', function(){
+    sens = parseFloat(sensEl.value);
+    sensValEl.textContent = sens.toFixed(2);
+    try{ localStorage.setItem('pp-sens', String(sens)); }catch(e){}
+  });
+  cfgBtn.addEventListener('click', function(){
+    ensureAudio();
+    sheetEl.classList.toggle('show');
+  });
+  sheetOkBtn.addEventListener('click', function(){
+    sheetEl.classList.remove('show');
+    toast('灵敏度 ' + sens.toFixed(2) + ' 倍', 1600);
+  });
+
   // ---------- 粒子 ----------
   function spawnPuff(x, y){
     for(var i = 0; i < 4; i++){
@@ -590,20 +666,24 @@
 
     // 吹气强度始终读取（方便校准和显示力度条）
     var target = readBlow();
-    blow = target > blow ? blow + (target - blow) * 0.55 : blow + (target - blow) * 0.10;
+    blow = target > blow ? blow + (target - blow) * 0.55 : blow + (target - blow) * 0.18;
     if(micOn){ blowFill.style.width = Math.round(blow * 100) + '%'; }
 
     if(state !== 'playing'){ blowPrev = blow; return; }
 
+    // 吹气强度 → 实际出力：灵敏度 × 非线性（轻轻吹几乎没劲，用力吹才够）
+    var eff = Math.pow(blow, 2.2) * sens;
+
     if(autoFlap){
       // ===== 自动扇翅膀模式 =====
       // 一直吹气，就按力度自动"扇一下"，不用点屏幕
-      if(blow > 0.12){
+      if(blow > 0.14){
         autoT += dt;
-        var interval = 0.42 - 0.16 * blow;      // 吹得越用力，扇得越勤
+        var cEff = Math.min(eff, 1.2);
+        var interval = 0.62 - 0.22 * cEff;      // 越用力扇得越勤
         if(autoT >= interval){
           autoT = 0;
-          var st = 0.75 + 0.25 * blow;          // 吹得越用力，扇得越大
+          var st = 0.55 + 0.45 * cEff;          // 越用力扇得越大
           plane.vy = Math.min(plane.vy, -flapV * st);
           spawnPuff(plane.x - 10 * S, plane.y + 8 * S);
           soundFlap();
@@ -612,12 +692,12 @@
         autoT = 0;
       }
       // 起吹那一下轻轻托一把
-      if(blowPrev < 0.25 && blow >= 0.25){ plane.vy -= flapV * 0.2 * blow; }
+      if(blowPrev < 0.3 && blow >= 0.3){ plane.vy -= flapV * 0.12 * eff; }
     } else {
       // ===== 持续升力模式 =====
-      if(blow > 0.02){
-        plane.vy -= G * 2.4 * blow * dt;
-        if(blowPrev < 0.25 && blow >= 0.25){ plane.vy -= flapV * 0.45 * blow; }
+      if(blow > 0.05){
+        plane.vy -= G * 1.9 * eff * dt;
+        if(blowPrev < 0.3 && blow >= 0.3){ plane.vy -= flapV * 0.18 * eff; }
       }
     }
     blowPrev = blow;
@@ -625,7 +705,7 @@
     // 物理
     plane.vy += G * dt;
     if(plane.vy > H * 1.15) plane.vy = H * 1.15;
-    if(plane.vy < -H * 0.95) plane.vy = -H * 0.95;
+    if(plane.vy < -H * 0.85) plane.vy = -H * 0.85;
     plane.y += plane.vy * dt;
 
     if(plane.y < 14 * S){ plane.y = 14 * S; if(plane.vy < 0) plane.vy = 0; }
