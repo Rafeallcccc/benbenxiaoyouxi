@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>吹气检测 · 纸飞机</title>
+<style>
+  :root{ --ink:#22303f; --green:#1a9e3f; --red:#e0562e; --blue:#2d7ff9; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(180deg,#0f1b2a,#1b2b3f 60%,#24405c);
+    color:#eaf2ff; padding:16px 16px 40px; overflow-y:auto;
+  }
+  h1{ font-size:20px; margin:0 0 12px; text-align:center; font-weight:800; }
+  .card{
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12);
+    border-radius:14px; padding:12px 14px; margin-bottom:12px; font-size:14px; line-height:1.6;
+  }
+  .ok{ color:#7ee2a8; } .bad{ color:#ff9b8a; } .warn{ color:#ffd166; }
+  button{
+    width:100%; font-family:inherit; font-size:18px; font-weight:800; color:#fff;
+    background:var(--blue); border:none; border-radius:14px; padding:16px; margin:6px 0 14px;
+    cursor:pointer; box-shadow:0 5px 0 #1b5fc4;
+  }
+  button:active{ transform:translateY(3px); box-shadow:0 2px 0 #1b5fc4; }
+  button:disabled{ background:#4a5b70; box-shadow:0 5px 0 #33404f; }
+  .meter{ position:relative; height:26px; background:rgba(255,255,255,.1); border-radius:13px; overflow:hidden; margin:8px 0; }
+  .meter > i{ position:absolute; left:0; top:0; bottom:0; width:0%; border-radius:13px; transition:width .05s linear; }
+  #rmsBar{ background:linear-gradient(90deg,#4fc3f7,#2d7ff9); }
+  #hiBar{ background:linear-gradient(90deg,#ffd166,#e0562e); }
+  .rowline{ display:flex; justify-content:space-between; font-size:13px; color:#a9bdd3; }
+  .verdict{
+    text-align:center; font-size:30px; font-weight:900; padding:14px 0 6px; letter-spacing:1px;
+  }
+  .num{ font-variant-numeric:tabular-nums; font-weight:700; color:#fff; }
+  #log{
+    font-size:12px; line-height:1.7; white-space:pre-wrap; word-break:break-all;
+    color:#9fb4cc; background:rgba(0,0,0,.28); border-radius:12px; padding:12px; margin:0;
+    max-height:260px; overflow:auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>🫁 吹气检测</h1>
+
+<div class="card" id="env">检测环境中…</div>
+
+<button id="start">开始检测（会请求麦克风权限）</button>
+
+<div class="card">
+  <div class="verdict" id="verdict">🔇 等待开始</div>
+  <div class="rowline"><span>音量（整体响度）</span><span class="num" id="rmsVal">0.000</span></div>
+  <div class="meter"><i id="rmsBar"></i></div>
+  <div class="rowline"><span>高频占比（吹气特征）</span><span class="num" id="hiVal">0%</span></div>
+  <div class="meter"><i id="hiBar"></i></div>
+  <div class="rowline"><span>累计吹气</span><span class="num" id="accVal">0.0 秒</span></div>
+</div>
+
+<div class="card">
+  <div style="font-size:13px;color:#a9bdd3;margin-bottom:6px">诊断信息（可截图发我）</div>
+  <pre id="log"></pre>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var envEl = document.getElementById('env');
+  var startBtn = document.getElementById('start');
+  var verdictEl = document.getElementById('verdict');
+  var rmsValEl = document.getElementById('rmsVal');
+  var rmsBarEl = document.getElementById('rmsBar');
+  var hiValEl = document.getElementById('hiVal');
+  var hiBarEl = document.getElementById('hiBar');
+  var accValEl = document.getElementById('accVal');
+  var logEl = document.getElementById('log');
+
+  var audioCtx = null, analyser = null, dataTime = null, dataFreq = null;
+  var stream = null, running = false;
+  var sampleRate = 44100;
+  var noiseFloor = 0.004;      // 环境底噪（校准值）
+  var calibrated = false, calibFrames = 0, calibSum = 0;
+  var accBlow = 0;             // 累计吹气秒数
+  var lastT = 0;
+
+  function log(msg){
+    logEl.textContent += msg + '\n';
+  }
+
+  // ---------- 环境检测 ----------
+  log('UA: ' + navigator.userAgent);
+  log('isSecureContext: ' + window.isSecureContext);
+  log('protocol: ' + location.protocol);
+  log('getUserMedia: ' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+  log('AudioContext: ' + !!(window.AudioContext || window.webkitAudioContext));
+
+  var secure = window.isSecureContext;
+  var hasGUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var hasAC = !!(window.AudioContext || window.webkitAudioContext);
+
+  if(!secure){
+    envEl.innerHTML = '<span class="bad">✗ 当前不是安全上下文（HTTPS）</span><br>' +
+      '浏览器只在 https:// 或 localhost 下允许用麦克风。<br>' +
+      '请把本文件上传到 GitHub Pages，用 https 网址打开。';
+  } else if(!hasGUM){
+    envEl.innerHTML = '<span class="bad">✗ 这个浏览器不支持 getUserMedia</span><br>' +
+      '很可能是微信内置浏览器限制，或系统版本太旧。';
+  } else if(!hasAC){
+    envEl.innerHTML = '<span class="bad">✗ 不支持 Web Audio API</span>';
+  } else {
+    envEl.innerHTML = '<span class="ok">✓ 环境看起来支持</span><br>' +
+      '点下面的按钮，允许麦克风后开始检测。';
+  }
+
+  // ---------- 开始 ----------
+  startBtn.addEventListener('click', function(){
+    if(running) return;
+    startBtn.disabled = true;
+    startBtn.textContent = '正在打开麦克风…';
+
+    navigator.mediaDevices.getUserMedia({
+      audio:{
+        echoCancellation: false,   // 关键：关掉回声消除/降噪/自动增益，
+        noiseSuppression: false,   // 否则吹气会被当成噪声抹掉
+        autoGainControl: false
+      }
+    }).then(function(st){
+      stream = st;
+      log('getUserMedia OK');
+      var track = st.getAudioTracks()[0];
+      var st2 = track.getSettings ? track.getSettings() : {};
+      log('device: ' + (track.label || '(无标签)'));
+      log('settings: ' + JSON.stringify(st2));
+
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      sampleRate = audioCtx.sampleRate;
+      log('sampleRate: ' + sampleRate + ' Hz');
+      log('AudioContext.state: ' + audioCtx.state);
+
+      var src = audioCtx.createMediaStreamSource(st);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.5;
+      src.connect(analyser);
+
+      dataTime = new Float32Array(analyser.fftSize);
+      dataFreq = new Float32Array(analyser.frequencyBinCount);
+
+      if(audioCtx.state === 'suspended'){ audioCtx.resume(); }
+
+      running = true;
+      startBtn.textContent = '检测中…（先安静 1 秒，然后对着麦克风吹气）';
+      lastT = performance.now();
+      requestAnimationFrame(loop);
+    }).catch(function(err){
+      startBtn.disabled = false;
+      startBtn.textContent = '重试';
+      log('✗ getUserMedia 失败: ' + err.name + ' — ' + err.message);
+      var hint = '';
+      if(err.name === 'NotAllowedError') hint = '权限被拒绝（在微信里可能被系统/浏览器静默拒绝）';
+      else if(err.name === 'NotFoundError') hint = '没有找到麦克风设备';
+      else if(err.name === 'NotReadableError') hint = '麦克风被其他程序占用';
+      else if(err.name === 'SecurityError') hint = '安全限制（必须 https）';
+      verdictEl.textContent = '❌ 麦克风打不开';
+      envEl.innerHTML = '<span class="bad">✗ 打不开麦克风：' + err.name + '</span><br>' + hint;
+    });
+  });
+
+  // ---------- 频段能量（dB → 线性功率累加）----------
+  function bandPower(freq, fromHz, toHz){
+    var binHz = sampleRate / analyser.fftSize;
+    var a = Math.max(1, Math.floor(fromHz / binHz));
+    var b = Math.min(freq.length - 1, Math.ceil(toHz / binHz));
+    var sum = 0;
+    for(var i = a; i <= b; i++){
+      var db = freq[i];
+      sum += Math.pow(10, db / 10);
+    }
+    return sum / Math.max(1, (b - a + 1));
+  }
+
+  function loop(){
+    if(!running) return;
+    var now = performance.now();
+    var dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    analyser.getFloatTimeDomainData(dataTime);
+    analyser.getFloatFrequencyData(dataFreq);
+
+    // 时域 RMS
+    var sum = 0;
+    for(var i = 0; i < dataTime.length; i++){
+      var v = dataTime[i];
+      sum += v * v;
+    }
+    var rms = Math.sqrt(sum / dataTime.length);
+
+    // 频段：低(人声能量集中) / 中 / 高(吹气的高频噪声)
+    var eLow  = bandPower(dataFreq, 100, 700);
+    var eMid  = bandPower(dataFreq, 700, 2000);
+    var eHigh = bandPower(dataFreq, 2000, 6000);
+    var hiRatio = eHigh / (eLow + eMid + eHigh + 1e-12);
+
+    // 前 1 秒安静期做一次底噪校准
+    if(!calibrated){
+      calibSum += rms;
+      calibFrames++;
+      if(calibFrames > 60){
+        noiseFloor = Math.max(0.002, calibSum / calibFrames);
+        calibrated = true;
+        log('环境底噪校准完成: ' + noiseFloor.toFixed(4));
+      }
+    }
+
+    var loudEnough = rms > Math.max(0.012, noiseFloor * 3);
+    var blowLike = loudEnough && hiRatio > 0.22;
+
+    if(blowLike){ accBlow += dt; }
+
+    // 显示
+    rmsValEl.textContent = rms.toFixed(3);
+    rmsBarEl.style.width = Math.min(100, Math.round(rms * 400)) + '%';
+    hiValEl.textContent = Math.round(hiRatio * 100) + '%';
+    hiBarEl.style.width = Math.min(100, Math.round(hiRatio * 200)) + '%';
+    accValEl.textContent = accBlow.toFixed(1) + ' 秒';
+
+    if(blowLike){
+      verdictEl.textContent = '🫁 检测到吹气！';
+      verdictEl.style.color = '#7ee2a8';
+    } else if(loudEnough){
+      verdictEl.textContent = '🗣 有声音（像说话）';
+      verdictEl.style.color = '#ffd166';
+    } else {
+      verdictEl.textContent = '🔇 安静';
+      verdictEl.style.color = '#9fb4cc';
+    }
+
+    requestAnimationFrame(loop);
+  }
+})();
+</script>
+</body>
+</html>
